@@ -127,12 +127,20 @@ container/run.sh --image dynamo:latest-vllm-runtime -it
 docker build -f container/Dockerfile.test --build-arg BASE_IMAGE=dynamo:latest-vllm-runtime -t dynamo:latest-vllm-test .
 ```
 
-### 3. local-dev + `run.sh` (runs as dynamo user with matched host UID/GID):
+### 3. agent-dev image (self-contained image for coding agents):
+```bash
+# Build a SHA-pinned image with source, dev/test deps, Rust deps, and editable installs baked in.
+container/build-agent-dev.sh --sha HEAD --framework vllm --cuda-version 13.0
+```
+
+See [Agent Development Images](agent-dev.md) for the full contract and options.
+
+### 4. local-dev + `run.sh` (runs as dynamo user with matched host UID/GID):
 ```bash
 run.sh --mount-workspace -it --image dynamo:latest-vllm-local-dev ...
 ```
 
-### 3. local-dev + Dev Container Extension:
+### 5. local-dev + Dev Container Extension:
 Use VS Code/Cursor Dev Container Extension with devcontainer.json configuration. The `dynamo` user UID is automatically matched to your local user.
 
 ## Build and Run Scripts Overview
