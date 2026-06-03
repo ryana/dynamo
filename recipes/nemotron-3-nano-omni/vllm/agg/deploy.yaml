@@ -50,7 +50,7 @@ spec:
             - >-
               exec python3 -m dynamo.frontend
               --router-mode kv
-              --no-kv-events
+              --no-router-kv-events
               --http-port 8000
 
     VllmWorker:
@@ -94,6 +94,7 @@ spec:
               --model nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
               --served-model-name nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
               --max-model-len 131072
+              --kv-cache-dtype fp8
               --enable-multimodal
               --media-io-kwargs '{"video": {"num_frames": 512, "fps": 1}}'
               --trust-remote-code
