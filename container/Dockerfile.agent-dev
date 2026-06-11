@@ -1,0 +1,96 @@
+# syntax=docker/dockerfile:1.10.0-labs
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Finalizer for a self-contained coding-agent development image.
+#
+# This Dockerfile intentionally expects the build context to contain the target
+# source snapshot under ./repo. container/build-agent-dev.sh creates that context
+# from a requested git SHA so normal .dockerignore rules for deployment images do
+# not remove files that coding agents need to inspect or edit.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE} AS agent_dev
+
+ARG DYNAMO_COMMIT_SHA
+ARG CARGO_BUILD_FEATURES=dynamo-llm/block-manager
+ARG MATURIN_FEATURES=lightseek-mm
+ARG INSTALL_GPU_MEMORY_SERVICE=true
+ARG INSTALL_KVBM=false
+ARG RUN_PRECOMMIT_INSTALL=true
+ARG RUN_SANITY_CHECK=true
+
+USER root
+WORKDIR /workspace
+
+RUN rm -rf /workspace && mkdir -p /workspace /opt/dynamo/agent-dev && chown dynamo:0 /workspace
+COPY --chown=dynamo:0 repo/ /workspace/
+RUN printf '%s\n' "${DYNAMO_COMMIT_SHA}" > /opt/dynamo/agent-dev/source-sha && \
+    chmod 664 /opt/dynamo/agent-dev/source-sha
+
+USER dynamo
+WORKDIR /workspace
+SHELL ["/bin/bash", "-lc"]
+
+ENV WORKSPACE_DIR=/workspace \
+    DYNAMO_HOME=/workspace \
+    CARGO_TARGET_DIR=/workspace/target \
+    PRE_COMMIT_HOME=/home/dynamo/.cache/pre-commit
+
+# Keep git useful inside the image. The build script creates a one-commit repo
+# for the exact source snapshot so agents can use git status/diff locally.
+RUN git config --global --add safe.directory /workspace && \
+    git status --short && \
+    test -z "$(git status --short)"
+
+# Prove the expected toolchain exists before spending time on source builds.
+RUN python3 --version && \
+    uv --version && \
+    cargo --version && \
+    rustc --version && \
+    maturin --version && \
+    pytest --version && \
+    pre-commit --version
+
+# Fetch and build Rust dependencies while network is available during image
+# creation. Runtime package-manager env below forces later dependency gaps to
+# fail loudly instead of reaching out to the internet.
+RUN cargo fetch --locked
+RUN cargo build --features "${CARGO_BUILD_FEATURES}"
+
+# Install Dynamo from the baked source tree. Keep --no-deps so this image keeps
+# the framework solve inherited from the backend local-dev image.
+RUN cd /workspace/lib/bindings/python && \
+    if [ -n "${MATURIN_FEATURES}" ]; then \
+        maturin develop --uv --features "${MATURIN_FEATURES}"; \
+    else \
+        maturin develop --uv; \
+    fi && \
+    cd /workspace && \
+    uv pip install --no-deps -e /workspace
+
+RUN if [ "${INSTALL_GPU_MEMORY_SERVICE}" = "true" ]; then \
+        uv pip install -e /workspace/lib/gpu_memory_service; \
+    fi
+
+RUN if [ "${INSTALL_KVBM}" = "true" ]; then \
+        cd /workspace/lib/bindings/kvbm && maturin develop --uv; \
+    fi
+
+# Pre-install hook environments so pre-commit does not need the internet at
+# runtime for the hooks declared by this SHA.
+RUN if [ "${RUN_PRECOMMIT_INSTALL}" = "true" ]; then \
+        pre-commit install --install-hooks; \
+    fi
+
+RUN if [ "${RUN_SANITY_CHECK}" = "true" ]; then \
+        /workspace/dev/sanity_check.py --no-gpu-check; \
+    fi
+
+# Default runtime posture: package managers should use the caches and installed
+# environments produced above, not the network. This does not block the agent's
+# LLM connection; it only makes missing development dependencies explicit.
+ENV CARGO_NET_OFFLINE=true \
+    UV_OFFLINE=true \
+    PIP_NO_INDEX=1
+
+CMD ["bash", "-lc", "cd /workspace && exec bash"]
