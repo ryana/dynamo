@@ -102,6 +102,14 @@ The `run.sh` script and rendering scripts are conveniences that simplify common 
 
 **Note (vLLM/TRT-LLM/SGLang)**: All three runtime images inherit upstream Python solves. vLLM and SGLang install Dynamo wheels into the upstream system site-packages with `--system --no-deps`; the TRT-LLM runtime creates `/opt/dynamo/venv` with `--system-site-packages` and installs Dynamo wheels into that venv with `uv pip install --no-deps`, so upstream packages stay importable but Dynamo's wheels live in their own namespace. The `dev`/`local-dev` images also create `/opt/dynamo/venv` (with `--system-site-packages` where the runtime image uses system Python) so build tooling like `maturin` and `uv` is available without re-solving the framework Python stack.
 
+When building local source wheels into an upstream runtime image, build native
+wheels against a Linux/glibc baseline that is compatible with that runtime. For
+example, a wheel built in an Ubuntu 24.04 builder can be tagged
+`manylinux_2_39_*` and will not install into an Ubuntu 22.04 runtime whose
+supported tags stop at `manylinux_2_35_*`. Keep separate Cargo target caches for
+different base-image/glibc combinations so stale Rust build artifacts are not
+reused across incompatible builders.
+
 ## Usage Guidelines
 
 - **Use runtime target**: for benchmarking inference and deployments. Runs as non-root `dynamo` user (UID 1000, GID 0) for security
